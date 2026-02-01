@@ -534,6 +534,22 @@ def main():
             else:
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
+		# --- Výber hráča (presunutý sem z tabu Hráč) ---
+        st.markdown("### Výber hráča")
+        player_options = sorted([p for p in players_view["Hráč"].tolist()] if not players_view.empty else [], key=sk_sort_key)
+
+        # ak už je niečo v session_state (z predchádzajúceho výberu), predvoľ ho
+        prev_player = st.session_state.get("selected_player", None)
+        default_index = player_options.index(prev_player) if (prev_player in player_options) else (0 if player_options else None)
+
+        selected_player = st.selectbox(
+            "Hráč",
+            options=player_options if player_options else ["—"],
+            index=default_index,
+            key="selected_player"  # kľúč ostáva rovnaký, aby ho tab Hráč vedel použiť
+        )
+				
+				
         st.caption(
             f"Roky: {', '.join(map(str, selected_years_list)) if selected_years_list else '—'} • "
             f"Formáty: {', '.join(fmt_selected) if fmt_selected else '—'} • "
@@ -544,13 +560,76 @@ def main():
     # --------------------------------------------------------
     # Tab 2: Hráč (detail a súhrny)
     # --------------------------------------------------------
-    with tab_hrac:
-        st.subheader("Výber hráča")
-        player_options = sorted([p for p in players_view["Hráč"].tolist()] if not players_view.empty else [], key=sk_sort_key)
-        selected_player = st.selectbox("Hráč", options=player_options if player_options else ["—"],
-                                       index=0 if player_options else None, key="selected_player")
+        
+	with tab_hrac:
+        st.subheader("Detail hráča")
+        selected_player = st.session_state.get("selected_player")
 
-        if selected_player and selected_player != "—":
+        if not selected_player or selected_player == "—":
+            st.info("Hráča vyber v záložke **Prehľad** pod tabuľkou „Zoznam hráčov“.")
+        else:
+            # --- Ponechaj svoj doterajší kód na spracovanie vybraného hráča ---
+            # (od vyfiltrovania df_player, cez dfp, df_fmt_sum, df_year_sum,
+            #  až po zobrazenie výsledkov a súhrnov)
+            # Začiatok pôvodného bloku:
+            df_player = df.copy()
+            mask = False
+            for col in ["L1", "L2", "R1", "R2"]:
+                if col in df_player.columns:
+                    mask = mask | df_player[col].fillna("").astype(str).str.casefold().str.contains(selected_player.casefold())
+            df_player = df_player[mask]
+            if selected_years_list and "Rok" in df_player.columns:
+                df_player = df_player[df_player["Rok"].isin(selected_years_list)]
+            if fmt_selected and "Formát" in df_player.columns:
+                df_player = df_player[df_player["Formát"].isin(fmt_selected)]
+
+            if "Formát" in df_player.columns:
+                single_mask = df_player["Formát"].astype(str) == "Single"
+                for col in ["L2", "R2"]:
+                    if col in df_player.columns:
+                        df_player.loc[single_mask, col] = df_player.loc[single_mask, col].apply(
+                            lambda x: "" if (pd.isna(x) or str(x).strip().lower() in {"", "nan", "none", "null"}) else str(x).strip()
+                        )
+
+            if "Rok" in df_player.columns:
+                df_player["Rezort"] = df_player["Rok"].map(tourn_map).fillna("")
+
+            dfp = df_player.copy().drop(columns=[c for c in ["L1", "L2", "R1", "R2"] if c in df_player.columns], errors="ignore")
+            if "Rok" in dfp.columns and "Rezort" in dfp.columns:
+                cols = dfp.columns.tolist()
+                cols.remove("Rezort")
+                idx = cols.index("Rok") + 1
+                cols.insert(idx, "Rezort")
+                dfp = dfp[cols]
+            if "Deň" in dfp.columns:
+                dfp["Deň"] = pd.to_numeric(dfp["Deň"], errors="coerce").apply(lambda x: "" if pd.isna(x) else f"{int(x)}")
+            for col in ["Lbody", "Rbody"]:
+                if col in dfp.columns:
+                    dfp[col] = pd.to_numeric(dfp[col], errors="coerce").map(lambda v: "" if pd.isna(v) else _fmt_points(float(v)))
+
+            df_fmt_sum, df_year_sum = _summaries_for_player(df_player, selected_player, tourn_map)
+
+            st.subheader(f"Výsledky hráča: {selected_player}")
+            st.dataframe(dfp.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Súhrn podľa formátu**")
+                if df_fmt_sum.empty:
+                    st.info("Žiadne zápasy pre zvolené filtre.")
+                else:
+                    st.dataframe(df_fmt_sum[["Formát", "Body", "Zápasy", "Úspešnosť"]],
+                                 use_container_width=True, hide_index=True)
+            with c2:
+                st.markdown("**Súhrn podľa roku**")
+                if df_year_sum.empty:
+                    st.info("Žiadne zápasy pre zvolené filtre.")
+                else:
+                    st.dataframe(df_year_sum[["Rok", "Rezort", "Body", "Zápasy", "Úspešnosť"]],
+                                 use_container_width=True, hide_index=True)
+		
+		
+		if selected_player and selected_player != "—":
             # Vyfiltrované zápasy daného hráča (v rámci vybraných rokov a formátov)
             df_player = df.copy()
             mask = False
