@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from PIL import Image  # pridáme na načítanie PNG
 import re
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -318,7 +319,35 @@ def _excel_set_percent_format(ws, percent_headers: List[str]):
 # UI
 # ------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Lefties & Righties", layout="wide")
+    st.set_page_config(page_title="Lefties & Righties", page_icon="logo.png", layout="wide")
+
+	# --- LOGO: načítanie a zobrazenie ---
+    try:
+        logo = Image.open("logo.png")
+    except Exception:
+        logo = None
+
+    # horný header s logom + titulkom
+    c_logo, c_title = st.columns([1, 4], gap="small")
+    with c_logo:
+        if logo is not None:
+            st.image(logo, use_column_width=True)
+    with c_title:
+        st.markdown(
+            """
+            <div style="display:flex; align-items:flex-end; height:100%;">
+              <h1 style="margin:0 0 0.25rem 0;">Lefties & Righties</h1>
+              <div style="color:#666; font-style:italic; margin-left:0.5rem;">
+                ...more than golf
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # voliteľne: menšia verzia loga v sidebare
+    st.sidebar.image("logo.png", use_column_width=True)
+
     st.title("Lefties & Righties")
 
     df = load_data(EXCEL_PATH)
