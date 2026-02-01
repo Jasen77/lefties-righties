@@ -332,18 +332,6 @@ def main():
     with c_logo:
         if logo is not None:
             st.image(logo, use_column_width=True)
-    with c_title:
-        st.markdown(
-            """
-            <div style="display:flex; align-items:flex-end; height:100%;">
-              <h1 style="margin:0 0 0.25rem 0;">Lefties & Righties</h1>
-              <div style="color:#666; font-style:italic; margin-left:0.5rem;">
-                ...more than golf
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     # voliteľne: menšia verzia loga v sidebare
     st.sidebar.image("logo.png", use_column_width=True)
