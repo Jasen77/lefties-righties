@@ -922,14 +922,14 @@ with tab_turnaje:
             right_table = build_team_table(df_y, right_players, side='R')
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown(f"### Team Lefties {year}(kapitán: {to_firstname_first(l_captain)})")
+                st.markdown(f"### Team Lefties {year}  \n(kapitán: {to_firstname_first(l_captain)})")
                 if not left_table.empty:
                     sty = style_team_table(left_table, 'L')
                     st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
                 else:
                     st.info("Pre tento rok nie sú v dátach hráči tímu Lefties.")
             with c2:
-                st.markdown(f"### Team Righties {year}(kapitán: {to_firstname_first(r_captain)})")
+                st.markdown(f"### Team Righties {year}  \n(kapitán: {to_firstname_first(r_captain)})")
                 if not right_table.empty:
                     sty = style_team_table(right_table, 'R')
                     st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
@@ -946,5 +946,6 @@ with tab_turnaje:
 
             photo_url = str(t.get('Photo', '')).strip()
             if photo_url:
-                st.image(photo_url, use_column_width=True)
+                st.image(photo_url,  width=800)
+            #     st.image(photo_url,  use_container_width=True)
             st.markdown("")
