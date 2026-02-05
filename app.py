@@ -731,11 +731,16 @@ with tab_stats:
             else:
                 cols[i].markdown('<span class="marker"></span>', unsafe_allow_html=True)
 
+            # Prefix v labeli pre istotu (viditeľné aj bez CSS)
+            # prefix = "• "
+            # label = f"{prefix}{it}" if it == active_token else it
+            label = it
+
             if cols[i].button(it, use_container_width=True, key=f"stats_sort_btn_{it}"):
                 if it == 'Abc':
                     st.session_state['stats_sort'] = ('ABC', True)
                 elif it in ('SpB', 'SpZ', 'SpÚ'):
-                    name = {'SpB': 'Spolu Body', 'SpZ': 'Spolu Zápasy', 'Spolu Úsp.': 'SpÚ'}[it]
+                    name = {'SpB': 'Spolu Body', 'SpZ': 'Spolu Zápasy', 'SpÚ': 'Spolu Úsp.'}[it]                    
                     st.session_state['stats_sort'] = (name, False)
                 else:
                     st.session_state['stats_sort'] = (_sort_map[it], False)
