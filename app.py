@@ -16,7 +16,7 @@ APP_NAME = "Lefties vs Righties Ryder Cup"
 APP_VERSION = "1.0.0"
 APP_CREATED = "07.02.2026"
 
-DATA_FILE = "GolfData.xlsx"
+DATA_FILE = "Data\GolfData.xlsx"
 STYLES_FILE = "styles.css"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
