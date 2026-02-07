@@ -16,7 +16,7 @@ APP_NAME = "Lefties vs Righties Ryder Cup"
 APP_VERSION = "1.0.0"
 APP_CREATED = "07.02.2026"
 
-DATA_FILE = "Data\GolfData.xlsx"
+DATA_FILE = "Data/GolfData.xlsx"
 STYLES_FILE = "styles.css"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
@@ -98,7 +98,7 @@ st.markdown(
 COLOR_LEFT_BG = "#E6F2FF"  # bledomodrá
 COLOR_RIGHT_BG = "#FCE8E8"  # bledočervená
 # -- URL loga
-RAW_LOGO_URL = "https://raw.githubusercontent.com/Jasen77/lefties-righties/main/logo.png"
+RAW_LOGO_URL = "https://raw.githubusercontent.com/Jasen77/lefties-righties/main/Logo/logo.png"
 
 @st.cache_data(show_spinner=False)
 def load_data(xlsx_path: str):
