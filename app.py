@@ -13,8 +13,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.0.0"
-APP_CREATED = "07.02.2026"
+APP_VERSION = "1.0.2"
+APP_CREATED = "09.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
 STYLES_FILE = "styles.css"
@@ -397,7 +397,7 @@ def _current_user_id():
 
 _uid = _current_user_id()
 _uid_s = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in _uid)
-FILTER_JSON_FILE = f"filter_state_{_uid_s}.json"
+FILTER_JSON_FILE = f"Filter/filter_state_{_uid_s}.json"
 
 
 @dataclass
@@ -758,8 +758,9 @@ with tab_stats:
         teams_str = ", ".join(FILTER.teams) if FILTER.teams else "—"
         fmts_str = ", ".join(FILTER.formats) if FILTER.formats else "—"
         return (
-            f"**Turnaje:** {t_str}\n"
-            f"**Tímy:** {teams_str}\n"
+            f"Filter:  \n"
+            f"**Turnaje:** {t_str}  \n"
+            f"**Tímy:** {teams_str}  \n"
             f"**Formáty:** {fmts_str}"
         )
 
@@ -1219,6 +1220,7 @@ with tab_player:
 
     # -- Portrét hráča (200x200) ak existuje v hárku "Hráči"
     portrait_url = get_portrait_url(df_players_sheet, selected_canonical)
+    # st.write(portrait_url)
     if portrait_url:
         # používame HTML kvôli šírke aj výške naraz (Streamlit st.image vie priamo nastaviť len width)
         st.markdown(
@@ -1232,6 +1234,7 @@ with tab_player:
             unsafe_allow_html=True
         )    
     
+
     st.markdown("### Sumár (celkom podľa formátu)")
     st.markdown(style_simple_table(df_fmt_sum, bold_last=True).to_html(), unsafe_allow_html=True)
 
@@ -1728,7 +1731,8 @@ with tab_turnaje:
             try:
                 # Priprav názov súboru: L&R {Rok} {Rezort}.xlsx (bez neplatných znakov)
                 safe_rezort = re.sub(r'[\\/:*?"<>|]+', ' ', rezort).strip()
-                xlsx_name = f"L&R - {year} - {safe_rezort}.xlsx"
+                timestamp = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
+                xlsx_name = f"L&R - {year} - {safe_rezort} ({timestamp}).xlsx"
 
                 # Funkcia na export DF -> hárok + autofit stĺpcov
                 def _write_sheet_auto_fit(writer, df: pd.DataFrame, sheet_name: str):
