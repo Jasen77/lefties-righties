@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_CREATED = "09.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
@@ -855,26 +855,54 @@ with tab_stats:
                         active_token = token
                         break
 
+        # --- Tooltippy k tlačidlám usporiadania (Štatistiky) ---
+        FMT_SK = {
+            "Foursome": "Foursome",
+            "Fourball": "Fourball",
+            "Single": "Single",
+        }
+
+        help_map = {
+            "Abc": "Abecedné zoradenie podľa priezviska (A→Z).",
+            "SpB": "Zoradí podľa celkových bodov (Spolu) – zostupne.",
+            "SpZ": "Zoradí podľa počtu zápasov (Spolu) – zostupne.",
+            "SpÚ": "Zoradí podľa úspešnosti (Spolu) – zostupne.",
+        }
+        for fmt, tag in included:  # napr. [('Foursome','Fs'), ('Fourball','Fb'), ('Single','Si')]
+            fmt_name = FMT_SK.get(fmt, fmt)
+            help_map[f"{tag}B"] = f"Zoradí podľa bodov vo formáte {fmt_name} – zostupne."
+            help_map[f"{tag}Z"] = f"Zoradí podľa počtu zápasov vo formáte {fmt_name} – zostupne."
+            help_map[f"{tag}Ú"] = f"Zoradí podľa úspešnosti vo formáte {fmt_name} – zostupne."
+
         cols = st.columns(spec)
         for i, it in enumerate(row_items):
             if it == 'sep':
-                cols[i].markdown(" ", unsafe_allow_html=True)
+                cols[i].markdown("&nbsp;", unsafe_allow_html=True)
                 continue
+
             # marker pred tlačidlom (pre zvýraznenie aktívneho)
             if it == active_token:
-                cols[i].markdown('<div class="marker win-left"></div>', unsafe_allow_html=True)
+                cols[i].markdown('<div class="marker win-none"></div>', unsafe_allow_html=True)
             else:
                 cols[i].markdown('<div class="marker win-none"></div>', unsafe_allow_html=True)
 
-            if cols[i].button(it, use_container_width=True, key=f"stats_sort_btn_{it}"):
+            # TLAČIDLO s tooltipom
+            if cols[i].button(
+                it,
+                use_container_width=True,
+                key=f"stats_sort_btn_{it}",
+                help=help_map.get(it)
+            ):
+                # Nastavenie kľúča triedenia podľa tlačidla
                 if it == 'Abc':
                     st.session_state['stats_sort'] = ('ABC', True)
                 elif it in ('SpB', 'SpZ', 'SpÚ'):
                     name = {'SpB': 'Spolu Body', 'SpZ': 'Spolu Zápasy', 'SpÚ': 'Spolu Úsp.'}[it]
                     st.session_state['stats_sort'] = (name, False)
                 else:
+                    # mapovanie skrátených tokenov na názvy stĺpcov
                     st.session_state['stats_sort'] = (_sort_map[it], False)
-
+            
         allowed_sort_cols = {'ABC', 'Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.'}
         allowed_sort_cols |= set(_sort_map.values())
         if ('stats_sort' not in st.session_state) or (st.session_state['stats_sort'][0] not in allowed_sort_cols):
