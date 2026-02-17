@@ -13,11 +13,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.2.9"
 APP_CREATED = "17.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
 STYLES_FILE = "styles.css"
+FAVICON_FILE = "Logo/LR.ico"
 
 # -----------------------------
 # Detekcia zariadenia / OS (User-Agent) + rozlíšenie (JS)
@@ -148,7 +149,12 @@ def classify_device_type(device_label: str, metrics: dict) -> str:
     return 'desktop'
 
 
-st.set_page_config(page_title=APP_NAME, layout="wide")
+st.set_page_config(
+    page_title=APP_NAME,
+    # , layout="wide"
+    page_icon=FAVICON_FILE
+)
+
 # --- UI: odstránenie prázdneho priestoru nad hlavičkou (logo čo najvyššie) ---
 st.markdown(
     """
