@@ -13,13 +13,185 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.1.1"
-APP_CREATED = "15.02.2026"
+APP_VERSION = "1.2.8"
+APP_CREATED = "17.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
 STYLES_FILE = "styles.css"
 
+# -----------------------------
+# Detekcia zariadenia / OS (User-Agent) + rozlíšenie (JS)
+# -----------------------------
+
+def detect_device_os() -> tuple[str, str, str]:
+    """Vráti (device, os_name, raw_user_agent).
+
+    User-Agent čítame z `st.context.headers` (ak je dostupné). Ak nie, vrátime 'Neznáme'.
+    """
+    ua = ""
+    try:
+        ctx = getattr(st, 'context', None)
+        if ctx is not None and getattr(ctx, 'headers', None) is not None:
+            ua = ctx.headers.get('User-Agent', '') or ''
+    except Exception:
+        ua = ""
+
+    ua_l = ua.lower() if isinstance(ua, str) else ""
+
+    device = "Neznáme zariadenie"
+    if "iphone" in ua_l:
+        device = "iPhone"
+    elif "ipad" in ua_l:
+        device = "iPad"
+    elif "android" in ua_l and "mobile" in ua_l:
+        device = "Android telefón"
+    elif "android" in ua_l:
+        device = "Android tablet"
+    elif "windows" in ua_l:
+        device = "PC (Windows)"
+    elif "macintosh" in ua_l or "mac os x" in ua_l:
+        device = "Mac"
+    elif "linux" in ua_l:
+        device = "Linux"
+
+    import re
+    os_name = "Neznámy OS"
+    if "iphone" in ua_l or "ipad" in ua_l or "ipod" in ua_l:
+        m = re.search(r"os (\d+[_\.]\d+(?:[_\.]\d+)?)", ua_l)
+        ver = m.group(1).replace('_', '.') if m else ""
+        os_name = f"iOS {ver}".strip() if ver else "iOS"
+    elif "android" in ua_l:
+        m = re.search(r"android (\d+(?:\.\d+)*)", ua_l)
+        ver = m.group(1) if m else ""
+        os_name = f"Android {ver}".strip() if ver else "Android"
+    elif "windows nt" in ua_l:
+        m = re.search(r"windows nt (\d+(?:\.\d+)*)", ua_l)
+        ver = m.group(1) if m else ""
+        os_name = f"Windows NT {ver}".strip() if ver else "Windows"
+    elif "mac os x" in ua_l:
+        m = re.search(r"mac os x (\d+[\._]\d+(?:[\._]\d+)?)", ua_l)
+        ver = m.group(1).replace('_', '.') if m else ""
+        os_name = f"macOS {ver}".strip() if ver else "macOS"
+    elif "linux" in ua_l:
+        os_name = "Linux"
+
+    return device, os_name, ua
+
+
+def get_display_metrics() -> dict:
+    """Získa viewport/screen/dpr z prehliadača.
+
+    Používa balík `streamlit-javascript` (import `streamlit_javascript`).
+    Ak nie je dostupný alebo blokovaný (napr. embed/iframe policy), vráti {}.
+    """
+    try:
+        from streamlit_javascript import st_javascript  # pip install streamlit-javascript
+    except Exception:
+        return {}
+
+    try:
+        import json
+        # vraciame JSON string; niektoré verzie vracajú priamo dict
+        payload = st_javascript(
+            "JSON.stringify({iw: window.innerWidth, ih: window.innerHeight, dpr: window.devicePixelRatio, sw: screen.width, sh: screen.height})",
+            key="__display_metrics__",
+        )
+        if not payload:
+            return {}
+        data = json.loads(payload) if isinstance(payload, str) else payload
+
+        def _to_int(v):
+            try:
+                return int(round(float(v)))
+            except Exception:
+                return None
+
+        def _to_float(v):
+            try:
+                return float(v)
+            except Exception:
+                return None
+
+        out = {
+            'inner_width': _to_int(data.get('iw')),
+            'inner_height': _to_int(data.get('ih')),
+            'screen_width': _to_int(data.get('sw')),
+            'screen_height': _to_int(data.get('sh')),
+            'dpr': _to_float(data.get('dpr')),
+        }
+        if out.get('inner_width') and out.get('inner_height') and out.get('dpr'):
+            out['physical_viewport_width'] = int(round(out['inner_width'] * out['dpr']))
+            out['physical_viewport_height'] = int(round(out['inner_height'] * out['dpr']))
+        return out
+    except Exception:
+        return {}
+
+
+def classify_device_type(device_label: str, metrics: dict) -> str:
+    """Určí typ zariadenia (mobil/tablet/desktop).
+
+    Primárne podľa viewport šírky (CSS px). Fallback podľa UA detekcie.
+    """
+    w = metrics.get('inner_width') if isinstance(metrics, dict) else None
+    if isinstance(w, int) and w > 0:
+        if w <= 600:
+            return 'mobil'
+        if w <= 1024:
+            return 'tablet'
+        return 'desktop'
+
+    d = (device_label or '').lower()
+    if 'iphone' in d or 'android telefón' in d:
+        return 'mobil'
+    if 'ipad' in d or 'android tablet' in d:
+        return 'tablet'
+    return 'desktop'
+
+
 st.set_page_config(page_title=APP_NAME, layout="wide")
+# --- UI: odstránenie prázdneho priestoru nad hlavičkou (logo čo najvyššie) ---
+st.markdown(
+    """
+    <style>
+    /* TOP PADDING RESET */
+    [data-testid="stAppViewContainer"] .main .block-container { padding-top: 0rem !important; }
+    [data-testid="stAppViewContainer"] .main { padding-top: 0rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <style>
+    /* ===== APP HEADER (MOBILE + DESKTOP) ===== */
+    .app-header-mobile{width:100%; text-align:center; margin: 0.25rem 0 0.35rem;}
+    .app-title-mobile{width:100%; font-weight:900; line-height:1.05; font-size:1.75rem; display:block;}
+    .app-version-mobile{width:100%; color:#666; font-size:0.92rem; margin-top:0.15rem;}
+    .app-header-desktop{display:flex; align-items:center; gap:16px; margin:8px 0 6px;}
+    .app-logo-desktop{height:64px; width:auto; display:block;}
+    .app-title-desktop{font-size:1.75rem; font-weight:800; line-height:1.05; margin:0 0 2px 0;}
+    .app-version-desktop{color:#666; font-size:0.95rem; line-height:1.0; margin:0;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# --- UI: mobile tabuľky nech sa zmestia na šírku (menší font) ---
+st.markdown(
+    """
+    <style>
+    /* MOBILE TABLE FIT */
+    .mobile-fit table { width: 100% !important; table-layout: fixed !important; }
+    .mobile-fit th, .mobile-fit td { padding: 0.20rem 0.25rem !important; }
+    .mobile-fit table { font-size: 0.78rem !important; }
+    .mobile-fit td { word-wrap: break-word; overflow-wrap: anywhere; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # -- Vlastné štýly INLINE (eliminácia styles.css)  ### REPLACE
 STYLES_INLINE = r"""
@@ -269,24 +441,76 @@ if not Path(DATA_FILE).exists():
 df_matches, df_tournaments = load_data(DATA_FILE)
 df_players_sheet = load_players_sheet(DATA_FILE)
 
-# --- Header: logo + názov + verzia (kompaktnejšie medzery) ---
-st.markdown(
-    f"""
-    <div style="display:flex; align-items:center; gap:16px; margin:8px 0 6px;">
-      <img src="{RAW_LOGO_URL}" alt="Logo Lefties & Righties" style="height:64px; width:auto;">
-      <div style="display:flex; flex-direction:column;">
-        <div style="font-size:1.75rem; font-weight:800; line-height:1.05; margin:0 0 2px 0;">
-          {APP_NAME}
-        </div>
-        <div style="color:#666; font-size:0.95rem; line-height:1.0; margin:0;">
-          ver.: {APP_VERSION} ({APP_CREATED})
-        </div>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# --- Detekcia prostredia (pre layout hlavičky) ---
+_device, _os_name, _ua = detect_device_os()
+_metrics = get_display_metrics()
+_device_type = classify_device_type(_device, _metrics)
 
+# --- Header: logo + názov + verzia (kompaktnejšie medzery) ---
+if _device_type == "mobil":
+    # mobil: logo na celú šírku obrazovky, pod ním názov a verzia (názov cez celú šírku)
+    st.image(RAW_LOGO_URL, use_container_width=True)
+    st.markdown(
+        f"""
+        <div class="app-header-mobile">
+          <span class="app-title-mobile">{APP_NAME}</span>
+          <span class="app-version-mobile">ver.: {APP_VERSION} ({APP_CREATED})</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    # desktop/tablet: logo + názov + verzia v jednom riadku
+    st.markdown(
+        f"""
+        <div class="app-header-desktop">
+          <img src="{RAW_LOGO_URL}" alt="Logo aplikácie" class="app-logo-desktop"/>
+          <div>
+            <div class="app-title-desktop">{APP_NAME}</div>
+            <div class="app-version-desktop">ver.: {APP_VERSION} ({APP_CREATED})</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# --- Prostredie: zariadenie, OS a rozlíšenie (zobrazenie) ---
+# _device, _os_name, _ua = detect_device_os()
+# _metrics = get_display_metrics()
+# _device_type = classify_device_type(_device, _metrics)
+
+_res_parts = []
+if _metrics.get('inner_width') and _metrics.get('inner_height'):
+    _res_parts.append(f"Viewport: **{_metrics['inner_width']}×{_metrics['inner_height']}** CSS px")
+if _metrics.get('dpr'):
+    _res_parts.append(f"DPR: **{_metrics['dpr']:.2g}**")
+if _metrics.get('physical_viewport_width') and _metrics.get('physical_viewport_height'):
+    _res_parts.append(f"Odhad px (viewport×DPR): **{_metrics['physical_viewport_width']}×{_metrics['physical_viewport_height']}** px")
+
+_res_text = " | ".join(_res_parts) if _res_parts else "Rozlíšenie: **nedostupné** (skontroluj `streamlit-javascript`)"
+
+# Na stránke (viditeľné okamžite)
+# st.info(f"Zariadenie: **{_device}** ({_device_type}) | OS: **{_os_name}** | {_res_text}")
+  # zapo
+# V sidebar-e (aby to bolo vždy viditeľné)
+with st.sidebar:
+    st.markdown("### Prostredie")
+    st.write(f"Zariadenie: {_device} ({_device_type})")
+    st.write(f"OS: {_os_name}")
+    if _metrics:
+        st.write(f"Viewport: {_metrics.get('inner_width')}×{_metrics.get('inner_height')} CSS px")
+        st.write(f"DPR: {_metrics.get('dpr')}")
+    else:
+        st.caption("Rozlíšenie nie je dostupné (JS komponent).")
+
+
+# with st.expander("Technické detaily (User-Agent / displej)"):
+#     st.code(_ua or "User-Agent nebol dostupný (Streamlit neposkytol hlavičky).")
+#     if _metrics:
+#         st.json(_metrics)
+#     else:
+#         st.warning("Displejové metriky nie sú dostupné. Tip: spusti appku cez `python -m streamlit run app.py` a over `pip show streamlit-javascript` v tom istom prostredí.")
+# 
 # -----------------------------
 # Helpers
 # -----------------------------
@@ -310,6 +534,30 @@ def to_firstname_first(name: str) -> str:
     return f"{first} {last}"
 
 
+
+
+def short_name_msurname(full_name: str) -> str:
+    """Z 'Meno Priezvisko' urobí 'M. Priezvisko'."""
+    if not isinstance(full_name, str):
+        return ""
+    parts = full_name.strip().split()
+    if not parts:
+        return ""
+    first = parts[0]
+    last = parts[-1]
+    initial = (first[0] + ".") if first else ""
+    return (initial + " " + last).strip()
+
+
+def short_pair_names(val: str) -> str:
+    """Z textu 'Meno1 Priezvisko1, Meno2 Priezvisko2' urobí 'M. Priezvisko1, M. Priezvisko2'."""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s:
+        return s
+    parts = [x.strip() for x in s.split(",")]
+    return ", ".join(short_name_msurname(x) if x else "" for x in parts)
 def players_for_year_pairs_only(df_year: pd.DataFrame):
     """Vracia (lefties, righties) zoznamy hráčov pre daný rok – IBA z L1,L2,R1,R2."""
     left_set, right_set = set(), set()
@@ -383,20 +631,23 @@ def style_team_table(df: pd.DataFrame, side: str) -> Styler:
     return styler
 
 def style_matches_table(df: pd.DataFrame) -> Styler:
-    """Styler pre tabuľku zápasov: riadok podfarbený podľa víťaza, centrovanie, skrytý index, 'Deň' ako celé číslo."""
+    """Styler pre tabuľku zápasov: podfarbenie podľa víťaza, centrovanie, skrytý index.
+    Podporuje aj mobilné skratky stĺpcov: D/Z/F/L/R/V.
+    """
     header_bg = "#eeeeee"
 
-    if "Deň" in df.columns:
-        day_clean = df["Deň"].astype(str).str.strip().str.replace(r"\.$", "", regex=True)
+    day_col = "Deň" if "Deň" in df.columns else ("D" if "D" in df.columns else None)
+    if day_col:
+        day_clean = df[day_col].astype(str).str.strip().str.replace(r"\.$", "", regex=True)
         day_series = pd.to_numeric(day_clean, errors="coerce").astype("Int64")
         df = df.copy()
-        df["Deň"] = day_series
+        df[day_col] = day_series
 
     def _row_bg(row: pd.Series):
-        w = str(row.get("Víťaz", "")).strip().lower()
-        if w == "lefties":
+        w = str(row.get("Víťaz", row.get("V", ""))).strip().lower()
+        if w in ("lefties", "l"):
             bg = COLOR_LEFT_BG
-        elif w == "righties":
+        elif w in ("righties", "r"):
             bg = COLOR_RIGHT_BG
         else:
             bg = "inherit"
@@ -404,14 +655,16 @@ def style_matches_table(df: pd.DataFrame) -> Styler:
 
     styler = df.style.apply(_row_bg, axis=1)
 
-    if "Deň" in df.columns:
-        styler = styler.format(subset=["Deň"], formatter=lambda v: "" if pd.isna(v) else f"{int(v)}")
+    if day_col:
+        styler = styler.format(subset=[day_col], formatter=lambda v: "" if pd.isna(v) else f"{int(v)}")
 
-    cols_to_center = [c for c in df.columns if c in ["Rok", "Deň", "Zápas", "Formát", "Lefties", "Righties", "Víťaz"]]
+    cols_to_center = [
+        c for c in df.columns
+        if c in ["Rok","Deň","Zápas","Formát","Lefties","Righties","Víťaz","D","Z","F","L","R","V","A/S"]
+    ]
     if cols_to_center:
         styler = styler.set_properties(subset=cols_to_center, **{"text-align": "center"})
 
-    # SIVÉ HLAVIČKY
     styler = styler.set_table_styles([
         {"selector": "th", "props": f"font-weight:700; text-align:center; background-color:{header_bg};"}
     ])
@@ -422,7 +675,7 @@ def style_matches_table(df: pd.DataFrame) -> Styler:
         styler = styler.hide_index()
 
     return styler
-
+    
 def style_simple_table(df: pd.DataFrame, bold_last: bool = False) -> pd.io.formats.style.Styler:
     """
     Jednoduchý styler pre sumarizačné tabuľky (Formát/Rezort/Dvojice).
@@ -513,6 +766,28 @@ _uid = _current_user_id()
 _uid_s = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in _uid)
 FILTER_JSON_FILE = f"Filter/filter_state_{_uid_s}.json"
 
+# --- DEBUG: Filter JSON (voliteľné) ---
+def _debug_filter_json_ui():
+    try:
+        with st.sidebar.expander('DEBUG FILTER JSON', expanded=False):
+            st.write('FILTER_JSON_FILE:', FILTER_JSON_FILE)
+            p_json = Path(FILTER_JSON_FILE)
+            st.write('exists:', p_json.exists())
+            st.write('mtime:', datetime.fromtimestamp(p_json.stat().st_mtime) if p_json.exists() else None)
+            st.write('flt_bootstrapped:', st.session_state.get('flt_bootstrapped'))
+            st.write('flt_json_mtime(session):', st.session_state.get('flt_json_mtime'))
+            st.write('flt_t_all:', st.session_state.get('flt_t_all'))
+            st.write('flt_team_lefties:', st.session_state.get('flt_team_lefties'))
+            st.write('flt_team_righties:', st.session_state.get('flt_team_righties'))
+            st.write('flt_fmt_foursome:', st.session_state.get('flt_fmt_foursome'))
+            st.write('flt_fmt_fourball:', st.session_state.get('flt_fmt_fourball'))
+            st.write('flt_fmt_single:', st.session_state.get('flt_fmt_single'))
+    except Exception:
+        pass
+
+_debug_filter_json_ui()
+
+
 
 @dataclass
 class FilterState:
@@ -537,14 +812,14 @@ def _build_tournament_items(df_tournaments: pd.DataFrame) -> list[dict]:
     for i, r in tdf.iterrows():
         year = r.get("Rok")
         rezort = str(r.get("Rezort", "")).strip()
-        key = f"flt_t_{i}"
+        key = f"flt_t_{int(year) if pd.notna(year) else i}"
         label = f"{int(year) if pd.notna(year) else ''} - {rezort}".strip(" -")
         items.append({"key": key, "label": label})
     return items
 
 
 def update_filter_from_session() -> None:
-    FILTER.t_all = st.session_state.get('flt_t_all', False)
+    FILTER.t_all = st.session_state.get('flt_t_all', True)
     keys = st.session_state.get('flt_t_keys', [])
     FILTER.t_child_map = {k: st.session_state.get(k, False) for k in keys}
     FILTER.t_selected = st.session_state.get('flt_tournaments', [])
@@ -561,8 +836,10 @@ def _save_filter_to_json() -> None:
         "formats": st.session_state.get('flt_formats', []),
         # NOVÉ: vybraný hráč v detaile hráča
         "player_selected_display": st.session_state.get('player_detail_selected_display', None),
+        "stats_hide_one_tournament": st.session_state.get('stats_hide_one_tournament', False),
     }
     try:
+        Path(FILTER_JSON_FILE).parent.mkdir(parents=True, exist_ok=True)
         Path(FILTER_JSON_FILE).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -578,14 +855,25 @@ def _load_filter_from_json() -> dict | None:
 
 
 def bootstrap_filter_state() -> None:
-    # Ak už prebehla inicializácia, iba zosynchronizuj a skonči.
-    if st.session_state.get('flt_bootstrapped'):
+    """Inicializácia filtra so spätným načítaním z JSON.
+    Pozn.: Streamlit môže pri zmene kódu/refreshi zachovať session_state,
+    preto reloadujeme aj vtedy, keď sa zmení mtime JSON súboru.
+    """
+    # Zisti mtime JSON (ak existuje)
+    p_json = Path(FILTER_JSON_FILE)
+    json_mtime = p_json.stat().st_mtime if p_json.exists() else None
+    last_mtime = st.session_state.get('flt_json_mtime')
+    need_reload = (not st.session_state.get('flt_bootstrapped')) or (json_mtime is not None and json_mtime != last_mtime)
+
+    # Ak netreba reload, iba zosynchronizuj globálny FILTER a skonči
+    if not need_reload:
         update_filter_from_session()
         return
 
     # 1) Vytvor položky turnajov a ulož ich kľúče (na to sa viažu checkboxy).
     items = _build_tournament_items(df_tournaments)
     st.session_state['flt_t_keys'] = [it['key'] for it in items]
+    st.session_state.setdefault('flt_json_mtime', None)
 
     # 2) Defaultné nastavenia (prvý štart bez JSON)
     for it in items:
@@ -604,15 +892,35 @@ def bootstrap_filter_state() -> None:
 
     # kľúč pre Detail hráča (môže byť None, ale musí existovať)
     st.session_state.setdefault('player_detail_selected_display', None)
+    st.session_state.setdefault('stats_hide_one_tournament', False)
 
     # 3) Načítaj JSON (ak existuje) a aplikuj hodnoty
     saved = _load_filter_from_json()
     if saved:
-        labels_sel = set(saved.get('t_selected_labels', []))
+        # načítaj master stav z JSON (ak chýba, dopočítaj neskôr)
+        st.session_state['flt_t_all'] = bool(saved.get('t_all', False))
+        labels_sel = list(saved.get('t_selected_labels', []))
+        years_sel = set()
+        for lbl in labels_sel:
+            try:
+                years_sel.add(int(str(lbl).split(' - ')[0].strip()))
+            except Exception:
+                pass
         for it in items:
-            st.session_state[it['key']] = (it['label'] in labels_sel)
+            if it['label'] in labels_sel:
+                st.session_state[it['key']] = True
+            else:
+                try:
+                    y_it = int(str(it['label']).split(' - ')[0].strip())
+                    st.session_state[it['key']] = (y_it in years_sel) if years_sel else False
+                except Exception:
+                    st.session_state[it['key']] = False
 
-        st.session_state['flt_t_all'] = all(st.session_state[k] for k in st.session_state['flt_t_keys'])
+        # ak je master v JSON True, označ všetky deti; inak dopočítaj z detí
+        if st.session_state.get('flt_t_all', False):
+            for k in st.session_state.get('flt_t_keys', []):
+                st.session_state[k] = True
+        st.session_state['flt_t_all'] = all(st.session_state.get(k, False) for k in st.session_state.get('flt_t_keys', []))
         st.session_state['flt_tournaments'] = [it['label'] for it in items if st.session_state[it['key']]]
 
         teams = saved.get('teams', ['Lefties', 'Righties'])
@@ -628,9 +936,11 @@ def bootstrap_filter_state() -> None:
 
         # posledný zvolený hráč pre Detail hráča (môže byť None)
         st.session_state['player_detail_selected_display'] = saved.get('player_selected_display', None)
+        st.session_state['stats_hide_one_tournament'] = bool(saved.get('stats_hide_one_tournament', False))
 
     # 4) Označ, že bootstrap prebehol, zosynchronizuj cache a hneď ulož stav do JSON.
     st.session_state['flt_bootstrapped'] = True
+    st.session_state['flt_json_mtime'] = json_mtime
     update_filter_from_session()
     _save_filter_to_json()
 
@@ -663,7 +973,7 @@ def _on_filter_change() -> None:
 
 
 def _toggle_all_tournaments() -> None:
-    val = st.session_state.get('flt_t_all', False)
+    val = st.session_state.get('flt_t_all', True)
     for k in st.session_state.get('flt_t_keys', []):
         st.session_state[k] = val
     _on_filter_change()
@@ -1015,15 +1325,18 @@ with tab_stats:
             _sort_map[f'{tag}Z'] = f'{fmt} Zápasy'
             _sort_map[f'{tag}Ú'] = f'{fmt} Úsp.'
 
+
         # Zobrazované voľby v selectboxe (default = SpÚ)
-        options = [("Abc", "Abecedne podľa priezviska")]
-        for fmt, tag in included:
+        options = [
+            ("SpB", "Spolu – Body"),
+            ("SpZ", "Spolu – Zápasy"),
+            ("SpÚ", "Spolu – Úspešnosť"),  # implicitná voľba
+        ]
+        for fmt, tag in included:  # included je už v poradí Foursome, Fourball, Single
             options.append((f"{tag}B", f"{fmt} – Body"))
             options.append((f"{tag}Z", f"{fmt} – Zápasy"))
             options.append((f"{tag}Ú", f"{fmt} – Úspešnosť"))
-        options.append(("SpB", "Spolu – Body"))
-        options.append(("SpZ", "Spolu – Zápasy"))
-        options.append(("SpÚ", "Spolu – Úspešnosť"))  # implicitná voľba
+        options.append(("Abc", "Abecedne podľa priezviska"))
 
         # Predvolená/aktuálna voľba
         default_token = "SpÚ"
@@ -1072,9 +1385,10 @@ with tab_stats:
         st.markdown('<div class="stats-fit">', unsafe_allow_html=True)
 
         hide_one_tournament = st.checkbox(
-            f"Nezobrazovať {hidden_now} hráčov s účasťou iba na jednom turnaji",
+            f"Vynechať {hidden_now} hráčov s účasťou iba na jednom turnaji",
             key="stats_hide_one_tournament",
-            value=False,
+            value=st.session_state.get('stats_hide_one_tournament', False),
+            on_change=_save_filter_to_json,
             help="Ak je zapnuté, v Štatistikách sa skryjú hráči, ktorí sa v celej histórii zúčastnili iba 1 ročníka."
         )
         
@@ -1122,36 +1436,99 @@ with tab_stats:
             df_disp.sort_values(by=['_sort_val', '_sort_name'], ascending=[sort_asc, True], inplace=True)
             df_disp.drop(columns=['_sort_val', '_sort_name'], inplace=True)
 
-        # --- Poradie stĺpcov podľa vybraných formátov
-        flat_order = ['Por.', 'Hráč', 'Team']
-        for fmt, _ in included:
-            flat_order += [f'{fmt} Body', f'{fmt} Zápasy', f'{fmt} Úsp.']
-        flat_order += ['Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.']
+        # --- Poradie stĺpcov podľa vybraných formátov (desktop vs mobil)
+        # Mobil: iba P, Hráč (M. Priezvisko), T (L/R) + 1 sekcia podľa zvoleného zoradenia (Foursome/Fourball/Single/Spolu)
+        # Pre export: vždy desktop reprezentácia (aj na mobile)
+        df_stats_export_source = df_disp.copy()
 
-        if 'Por.' in df_disp.columns:
-            df_disp['Por.'] = range(1, len(df_disp) + 1)
+        is_mobile = (globals().get('_device_type') == 'mobil')
+
+        def _short_name(full_name: str) -> str:
+            if not isinstance(full_name, str):
+                return ''
+            parts = full_name.strip().split()
+            if not parts:
+                return ''
+            first = parts[0]
+            last = parts[-1]
+            initial = (first[0] + '.') if first else ''
+            return (initial + ' ' + last).strip()
+
+        def _team_short(v: str) -> str:
+            s = str(v).strip()
+            return 'L' if s == 'Lefties' else ('R' if s == 'Righties' else s)
+
+        if is_mobile:
+            # sekcia podľa sort_key; pri abecednom zoradení vždy Spolu
+            sec = 'Spolu'
+            if sort_key != 'ABC':
+                head = str(sort_key).split(' ', 1)[0]
+                if head in ('Foursome', 'Fourball', 'Single') and head in sel_formats:
+                    sec = head
+
+            df_disp = df_disp.copy()
+            if 'Hráč' in df_disp.columns:
+                df_disp['Hráč'] = df_disp['Hráč'].apply(_short_name)
+            if 'Team' in df_disp.columns:
+                df_disp['Team'] = df_disp['Team'].apply(_team_short)
+
+            if 'Por.' in df_disp.columns:
+                df_disp['Por.'] = range(1, len(df_disp) + 1)
+            else:
+                df_disp.insert(0, 'Por.', range(1, len(df_disp) + 1))
+
+            if sec in ('Foursome', 'Fourball', 'Single'):
+                flat_order = ['Por.', 'Hráč', 'Team', sec + ' Body', sec + ' Zápasy', sec + ' Úsp.']
+                col_tuples = [('', 'P'), ('', 'Hráč'), ('', 'T'), (sec, 'B'), (sec, 'Z'), (sec, 'Ú')]
+            else:
+                flat_order = ['Por.', 'Hráč', 'Team', 'Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.']
+                col_tuples = [('', 'P'), ('', 'Hráč'), ('', 'T'), ('Spolu', 'B'), ('Spolu', 'Z'), ('Spolu', 'Ú')]
+
+            df_disp = df_disp[flat_order].copy()
+            df_disp.columns = pd.MultiIndex.from_tuples(col_tuples)
+
         else:
-            df_disp.insert(0, 'Por.', range(1, len(df_disp) + 1))
-        df_disp = df_disp[flat_order]
+            flat_order = ['Por.', 'Hráč', 'Team']
+            for fmt, _ in included:
+                flat_order += [fmt + ' Body', fmt + ' Zápasy', fmt + ' Úsp.']
+            flat_order += ['Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.']
 
-        # --- MultiIndex hlavičky (vizuálne skupiny stĺpcov)
-        col_tuples = [('', 'Por.'), ('', 'Hráč'), ('', 'Team')]
-        for fmt, _ in included:
-            col_tuples += [(fmt, 'Body'), (fmt, 'Zápasy'), (fmt, 'Úsp.')]
-        col_tuples += [('Spolu', 'Body'), ('Spolu', 'Zápasy'), ('Spolu', 'Úsp.')]
-        df_disp.columns = pd.MultiIndex.from_tuples(col_tuples)
+            if 'Por.' in df_disp.columns:
+                df_disp['Por.'] = range(1, len(df_disp) + 1)
+            else:
+                df_disp.insert(0, 'Por.', range(1, len(df_disp) + 1))
+            df_disp = df_disp[flat_order]
+
+            # --- MultiIndex hlavičky (vizuálne skupiny stĺpcov)
+            col_tuples = [('', 'Por.'), ('', 'Hráč'), ('', 'Team')]
+            for fmt, _ in included:
+                col_tuples += [(fmt, 'Body'), (fmt, 'Zápasy'), (fmt, 'Úsp.')]
+            col_tuples += [('Spolu', 'Body'), ('Spolu', 'Zápasy'), ('Spolu', 'Úsp.')]
+            df_disp.columns = pd.MultiIndex.from_tuples(col_tuples)
 
         def _col_tuple_for_sort_key(sk: str):
+            # Mobil: hlavičky sú skrátené (P/T, B/Z/Ú); Desktop: pôvodné
+            is_mobile_local = (globals().get('_device_type') == 'mobil')
             if sk == 'ABC':
                 return ('', 'Hráč')
-            if sk in ('Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.'):
-                return ('Spolu', sk.split()[-1])
-            try:
-                fmt, metric = sk.split(' ', 1)
-                return (fmt, metric)
-            except Exception:
+            if is_mobile_local:
+                if sk in ('Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.'):
+                    return ('Spolu', {'Body':'B','Zápasy':'Z','Úsp.':'Ú'}[sk.split()[-1]])
+                try:
+                    fmt, metric = sk.split(' ', 1)
+                    if fmt in ('Foursome','Fourball','Single'):
+                        return (fmt, {'Body':'B','Zápasy':'Z','Úsp.':'Ú'}.get(metric, metric))
+                except Exception:
+                    return None
                 return None
-
+            else:
+                if sk in ('Spolu Body', 'Spolu Zápasy', 'Spolu Úsp.'):
+                    return ('Spolu', sk.split()[-1])
+                try:
+                    fmt, metric = sk.split(' ', 1)
+                    return (fmt, metric)
+                except Exception:
+                    return None
         col_to_bold = _col_tuple_for_sort_key(sort_key)
 
         # --- Styler pre tabuľku Štatistiky
@@ -1168,10 +1545,10 @@ with tab_stats:
                 styler = styler.set_properties(subset=cols_center, **{"text-align": "center"})
 
             def _row_bg(row):
-                team = str(row.get(('', 'Team'), '')).strip()
-                if team == 'Lefties':
+                team = str(row.get(('', 'Team'), row.get(('', 'T'), ''))).strip()
+                if team in ('Lefties','L'):
                     bg = COLOR_LEFT_BG
-                elif team == 'Righties':
+                elif team in ('Righties','R'):
                     bg = COLOR_RIGHT_BG
                 else:
                     bg = 'inherit'
@@ -1209,7 +1586,7 @@ with tab_stats:
                         flat.append(str(col))
                 return flat
 
-            df_stats_export = df_disp.copy()
+            df_stats_export = df_stats_export_source.copy() if 'df_stats_export_source' in locals() else df_disp.copy()
             if isinstance(df_stats_export.columns, pd.MultiIndex):
                 df_stats_export.columns = _flatten_stats_columns(df_stats_export.columns)
 
@@ -1456,7 +1833,7 @@ with tab_player:
             )    
     
 
-            st.markdown("### Sumár (celkom podľa formátu)")
+            st.markdown("### Sumár podľa formátu")
             st.markdown(style_simple_table(df_fmt_sum, bold_last=True).to_html(), unsafe_allow_html=True)
 
             # -- SUMÁR podľa turnaja (Rok ↓, Rezort) + Spolu
@@ -1490,7 +1867,13 @@ with tab_player:
             df_year_sum = pd.DataFrame(rows_years, columns=["Rok", "Rezort", "Body", "Zápasy", "Úspešnosť"])
 
             st.markdown("### Sumár podľa turnaja")
-            st.markdown(style_simple_table(df_year_sum, bold_last=True).to_html(), unsafe_allow_html=True)
+            df_year_sum_disp = df_year_sum.copy()
+            if _device_type == 'mobil':
+                df_year_sum_disp = df_year_sum_disp.rename(columns={'Body':'B','Zápasy':'Z','Úspešnosť':'Ú'})
+                st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
+            st.markdown(style_simple_table(df_year_sum_disp, bold_last=True).to_html(), unsafe_allow_html=True)
+            if _device_type == 'mobil':
+                st.markdown('</div>', unsafe_allow_html=True)
 
             # -- TABUĽKA PÁROV ROZDELENÁ NA 2 STĹPCE: Foursome | Fourball (iba strana vybraného hráča)
             df_pairs = df_player[df_player["Formát"].isin(["Foursome", "Fourball"])].copy() if not df_player.empty else df_player.copy()
@@ -1710,9 +2093,17 @@ with tab_player:
 
                     # finálny výber stĺpcov – bez „Spolu“
                     df_opp_disp = df_opp[["Protihráč", "Výhra", "Remíza", "Prehra", "Body", "Zápasy", "Úspešnosť"]].copy()
-
-                    # render so sivou hlavičkou (bez súčtového riadku)
+                    # Pre export: vždy desktop reprezentácia (aj na mobile)
+                    df_opp_export = df_opp_disp.copy()
+                    if _device_type == 'mobil':
+                        df_opp_disp['Protihráč'] = df_opp_disp['Protihráč'].apply(short_name_msurname)
+                        df_opp_disp['V-A/S-P'] = df_opp_disp.apply(lambda rr: str(int(rr['Výhra']))+'-'+str(int(rr['Remíza']))+'-'+str(int(rr['Prehra'])), axis=1)
+                        df_opp_disp = df_opp_disp.rename(columns={'Body':'B','Zápasy':'Z','Úspešnosť':'Ú'})
+                        df_opp_disp = df_opp_disp[["Protihráč", "V-A/S-P", "B", "Z", "Ú"]]
+                        st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
                     st.markdown(style_simple_table(df_opp_disp, bold_last=False).to_html(), unsafe_allow_html=True)
+                    if _device_type == 'mobil':
+                        st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("Hráč nemá v zvolených **rokoch** a vybraných **formátoch** žiadne zápasy (pre výpočet protihráčov).")
         
@@ -1739,10 +2130,29 @@ with tab_player:
                 wanted_cols = ["Rok", "Deň", "Zápas", "Formát", "Lefties", "Righties", "Víťaz"]
                 cols_present = [c for c in wanted_cols if c in df_player.columns]
                 matches_view = df_player[cols_present].copy()
+                if _device_type == 'mobil':
+                    mv = matches_view.copy()
+                    fmt_map = {'Foursome':'Fs','Fourball':'Fb','Single':'S'}
+                    def _int_str(v):
+                        try:
+                            return str(int(float(v)))
+                        except Exception:
+                            s=str(v).strip(); return s.replace('.', '') if s.endswith('.') else s
+                    f_abbr = mv['Formát'].astype(str).map(lambda x: fmt_map.get(x, x)) if 'Formát' in mv.columns else ''
+                    mv['Zápas'] = mv['Rok'].map(_int_str) + '-' + mv['Deň'].map(_int_str) + '-' + mv['Zápas'].map(_int_str) + '-' + f_abbr
+                    if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
+                    if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
+                    if 'Víťaz' in mv.columns: mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
+                    mv.rename(columns={'Lefties':'L','Righties':'R','Víťaz':'V'}, inplace=True)
+                    cols = ['Zápas'] + [c for c in ['L','R','V','A/S'] if c in mv.columns]
+                    matches_view = mv[cols].copy()
                 sty = style_matches_table(matches_view)
-
                 st.markdown("### Zápasy")
-                st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
+                if _device_type == 'mobil':
+                    st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
+                st.markdown(sty.to_html(), unsafe_allow_html=True)
+                if _device_type == 'mobil':
+                    st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("Hráč nemá v zvolených **rokoch** a vybraných **formátoch** žiadne zápasy.")
 
@@ -1780,8 +2190,8 @@ with tab_player:
                     "Sumár podľa turnaja": locals().get("df_year_sum", pd.DataFrame()),
                     "Dvojice Foursome":     locals().get("df_pairs_fs", pd.DataFrame()),
                     "Dvojice Fourball":     locals().get("df_pairs_fb", pd.DataFrame()),
-                    "Protihráči":           locals().get("df_opp_disp", pd.DataFrame()),
-                    "Zápasy":               locals().get("matches_view", pd.DataFrame()),
+                    "Protihráči": locals().get("df_opp_export", locals().get("df_opp_disp", pd.DataFrame())),
+                    "Zápasy": locals().get("matches_view_export", locals().get("matches_view", pd.DataFrame())),
                 }
 
                 # 2) Hárok FILTER – vypíš všetky vybraté položky
@@ -1869,8 +2279,6 @@ with tab_filter:
         st.checkbox("Foursome", key='flt_fmt_foursome', on_change=_on_filter_change)
         st.checkbox("Fourball", key='flt_fmt_fourball', on_change=_on_filter_change)
         st.checkbox("Single", key='flt_fmt_single', on_change=_on_filter_change)
-
-
 # -----------------------------
 # Turnaje
 # -----------------------------
@@ -1928,25 +2336,55 @@ with tab_turnaje:
             with c1:
                 st.markdown(f"### Team Lefties {year}  \n(kapitán: {to_firstname_first(l_captain)})")
                 if not left_table.empty:
-                    sty = style_team_table(left_table, 'L')
+                    if _device_type == "mobil" and "Hráč" in left_table.columns:
+                        left_table = left_table.copy()
+                        left_table["Hráč"] = left_table["Hráč"].apply(short_name_msurname)
+                    sty = style_team_table(left_table, "L")
                     st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
                 else:
                     st.info("Pre tento rok nie sú v dátach hráči tímu Lefties.")
             with c2:
                 st.markdown(f"### Team Righties {year}  \n(kapitán: {to_firstname_first(r_captain)})")
                 if not right_table.empty:
-                    sty = style_team_table(right_table, 'R')
+                    if _device_type == "mobil" and "Hráč" in right_table.columns:
+                        right_table = right_table.copy()
+                        right_table["Hráč"] = right_table["Hráč"].apply(short_name_msurname)
+                    sty = style_team_table(right_table, "R")
                     st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
                 else:
                     st.info("Pre tento rok nie sú v dátach hráči tímu Righties.")
 
             st.markdown("---")
-            wanted_cols = ["Rok", "Deň", "Zápas", "Formát", "Lefties", "Righties", "Víťaz"]
+            wanted_cols = ["Rok", "Deň", "Zápas", "Formát", "Lefties", "Righties", "Víťaz", "A/S"]
             cols_present = [c for c in wanted_cols if c in df_y.columns]
             matches_view = df_y[cols_present].copy()
+            # Pre export: vždy desktop reprezentácia (aj na mobile)
+            matches_view_export = matches_view.copy()
+            # Turnaje: vždy všetky zápasy za vybraný rok (ignoruje Filter aj Detail hráča)
+            if _device_type == 'mobil':
+                mv = matches_view.copy()
+                fmt_map = {'Foursome':'Fs','Fourball':'Fb','Single':'S'}
+                def _int_str(v):
+                    try:
+                        return str(int(float(v)))
+                    except Exception:
+                        s = str(v).strip()
+                        return s.replace('.', '') if s.endswith('.') else s
+                f_abbr = mv['Formát'].astype(str).map(lambda x: fmt_map.get(x, x)) if 'Formát' in mv.columns else ''
+                mv['Zápas'] = mv['Deň'].map(_int_str) + '-' + mv['Zápas'].map(_int_str) + '-' + f_abbr
+                if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
+                if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
+                if 'Víťaz' in mv.columns: mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
+                mv.rename(columns={'Lefties':'L','Righties':'R','Víťaz':'V'}, inplace=True)
+                cols = ['Zápas'] + [c for c in ['L','R','V','A/S'] if c in mv.columns]
+                matches_view = mv[cols].copy()
             st.markdown(f"### Zápasy {year}")
             sty = style_matches_table(matches_view)
-            st.markdown(f"{sty.to_html()}", unsafe_allow_html=True)
+            if _device_type == 'mobil':
+                st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
+            st.markdown(sty.to_html(), unsafe_allow_html=True)
+            if _device_type == 'mobil':
+                st.markdown('</div>', unsafe_allow_html=True)
 
             # --- Export do Excelu: Team Lefties {year}, Team Righties {year}, Zápasy {year} ---
             try:
@@ -1989,7 +2427,7 @@ with tab_turnaje:
                 # Zostav DF pre export
                 sheet_left  = left_table.copy()  if 'left_table'  in locals() else pd.DataFrame()
                 sheet_right = right_table.copy() if 'right_table' in locals() else pd.DataFrame()
-                sheet_games = matches_view.copy() if 'matches_view' in locals() else pd.DataFrame()
+                sheet_games = matches_view_export.copy() if 'matches_view_export' in locals() else (matches_view.copy() if 'matches_view' in locals() else pd.DataFrame())
 
                 # (Voliteľné) zoradenie stĺpcov, ak by DF prišli v inom poradí
                 # Team hárky: Hráč, Body, Zápasy, Úspešnosť
