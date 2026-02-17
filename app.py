@@ -150,8 +150,7 @@ def classify_device_type(device_label: str, metrics: dict) -> str:
 
 
 st.set_page_config(
-    page_title=APP_NAME,
-    # , layout="wide"
+    page_title=APP_NAME, layout="wide",
     page_icon=FAVICON_FILE
 )
 
