@@ -2130,22 +2130,39 @@ with tab_player:
                 wanted_cols = ["Rok", "Deň", "Zápas", "Formát", "Lefties", "Righties", "Víťaz"]
                 cols_present = [c for c in wanted_cols if c in df_player.columns]
                 matches_view = df_player[cols_present].copy()
+
                 if _device_type == 'mobil':
                     mv = matches_view.copy()
                     fmt_map = {'Foursome':'Fs','Fourball':'Fb','Single':'S'}
+
                     def _int_str(v):
                         try:
                             return str(int(float(v)))
                         except Exception:
-                            s=str(v).strip(); return s.replace('.', '') if s.endswith('.') else s
+                            s = str(v).strip()
+                            return s.replace('.', '') if s.endswith('.') else s
+
                     f_abbr = mv['Formát'].astype(str).map(lambda x: fmt_map.get(x, x)) if 'Formát' in mv.columns else ''
-                    mv['Zápas'] = mv['Rok'].map(_int_str) + '-' + mv['Deň'].map(_int_str) + '-' + mv['Zápas'].map(_int_str) + '-' + f_abbr
-                    if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
-                    if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
-                    if 'Víťaz' in mv.columns: mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
-                    mv.rename(columns={'Lefties':'L','Righties':'R','Víťaz':'V'}, inplace=True)
-                    cols = ['Zápas'] + [c for c in ['L','R','V','A/S'] if c in mv.columns]
+                    mv['Zápas'] = (
+                        mv['Rok'].map(_int_str) + '-' +
+                        mv['Deň'].map(_int_str) + '-' +
+                        mv['Zápas'].map(_int_str) + '-' +
+                        f_abbr
+                    )
+
+                    # ❗Lefties/Righties nechaj rovnaké ako desktop (bez skratiek mien)
+                    # if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
+                    # if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
+
+                    # Víťaz skráť na V a hodnoty Lefties/Righties na L/R ponechaj (toto je OK)
+                    if 'Víťaz' in mv.columns:
+                        mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
+                        mv.rename(columns={'Víťaz': 'V'}, inplace=True)
+
+                    # ✅ Stĺpce ponechaj: Zápas, Lefties, Righties, V, A/S
+                    cols = ['Zápas'] + [c for c in ['Lefties','Righties','V','A/S'] if c in mv.columns]
                     matches_view = mv[cols].copy()
+                
                 sty = style_matches_table(matches_view)
                 st.markdown("### Zápasy")
                 if _device_type == 'mobil':
@@ -2361,24 +2378,35 @@ with tab_turnaje:
             # Pre export: vždy desktop reprezentácia (aj na mobile)
             matches_view_export = matches_view.copy()
             # Turnaje: vždy všetky zápasy za vybraný rok (ignoruje Filter aj Detail hráča)
+
             if _device_type == 'mobil':
                 mv = matches_view.copy()
                 fmt_map = {'Foursome':'Fs','Fourball':'Fb','Single':'S'}
+
                 def _int_str(v):
                     try:
                         return str(int(float(v)))
                     except Exception:
                         s = str(v).strip()
                         return s.replace('.', '') if s.endswith('.') else s
+
                 f_abbr = mv['Formát'].astype(str).map(lambda x: fmt_map.get(x, x)) if 'Formát' in mv.columns else ''
                 mv['Zápas'] = mv['Deň'].map(_int_str) + '-' + mv['Zápas'].map(_int_str) + '-' + f_abbr
-                if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
-                if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
-                if 'Víťaz' in mv.columns: mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
-                mv.rename(columns={'Lefties':'L','Righties':'R','Víťaz':'V'}, inplace=True)
-                cols = ['Zápas'] + [c for c in ['L','R','V','A/S'] if c in mv.columns]
+
+                # ❗Lefties/Righties nechaj ako desktop (bez skratiek mien)
+                # if 'Lefties' in mv.columns: mv['Lefties'] = mv['Lefties'].apply(short_pair_names)
+                # if 'Righties' in mv.columns: mv['Righties'] = mv['Righties'].apply(short_pair_names)
+
+                # Víťaz skráť na V a hodnoty Lefties/Righties na L/R ponechaj
+                if 'Víťaz' in mv.columns:
+                    mv['Víťaz'] = mv['Víťaz'].astype(str).str.replace('Lefties','L').str.replace('Righties','R')
+                    mv.rename(columns={'Víťaz': 'V'}, inplace=True)
+
+                # ✅ Stĺpce ponechaj: Zápas, Lefties, Righties, V, A/S
+                cols = ['Zápas'] + [c for c in ['Lefties','Righties','V','A/S'] if c in mv.columns]
                 matches_view = mv[cols].copy()
-            st.markdown(f"### Zápasy {year}")
+
+                st.markdown(f"### Zápasy {year}")
             sty = style_matches_table(matches_view)
             if _device_type == 'mobil':
                 st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
