@@ -3,26 +3,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
+import io
+import re
 
 import pandas as pd
 import streamlit as st
 from pandas.io.formats.style import Styler
-import io
-import re
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
-
-st.markdown(
-    """
-    <link rel="apple-touch-icon" sizes="180x180" href="Logo/apple-touch-icon.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Lefties vs Righties">
-    """,
-    unsafe_allow_html=True,
-)
-
-
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
 APP_VERSION = "1.2.12"
@@ -166,7 +154,8 @@ def classify_device_type(device_label: str, metrics: dict) -> str:
 
 
 st.set_page_config(
-    page_title=APP_NAME, layout="wide",
+    page_title=APP_NAME, 
+    layout="wide",
     page_icon=FAVICON_FILE
 )
 
