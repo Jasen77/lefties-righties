@@ -13,12 +13,16 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.2.9"
-APP_CREATED = "17.02.2026"
+APP_VERSION = "1.2.11"
+APP_CREATED = "19.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
-STYLES_FILE = "styles.css"
 FAVICON_FILE = "Logo/LR.ico"
+PLAYERS_PATH = "Players/"
+ANONYM_FILE = PLAYERS_PATH + "Anonym.jpg"  # fallback portrét, keď hráč nemá fotku alebo URL neexistuje
+BASE_DIR = Path(__file__).resolve().parent
+PLAYERS_DIR = BASE_DIR / 'Players'
+
 
 # -----------------------------
 # Detekcia zariadenia / OS (User-Agent) + rozlíšenie (JS)
@@ -431,9 +435,14 @@ def load_players_sheet(xlsx_path: str) -> pd.DataFrame:
             m = re.search(r"https?://\S+", s)
             return m.group(0).strip(")];,") if m else None
 
+        dfp["_portrait_raw"] = dfp[portrait_col]
         dfp["_portrait_url"] = dfp[portrait_col].apply(_first_url)
+        # doplň aj relatívne cesty (Players/...) na raw github URL
+        dfp["_portrait_url"] = dfp["_portrait_url"].fillna(dfp["_portrait_raw"].apply(lambda v: (str(v).strip() if pd.notna(v) else None)))
+        # _portrait_url ostáva len ako prípadná URL vyextrahovaná z bunky
+        dfp["_portrait_url"] = dfp["_portrait_url"]
         # kľúč 'Hráč' nechávame v kanonickom formáte, zhoduje sa s menami v L1/L2/R1/R2
-        return dfp[["Hráč", "_portrait_url"]].copy()
+        return dfp[["Hráč", "_portrait_url", "_portrait_raw"]].copy()
     except Exception:
         return pd.DataFrame()
         
@@ -729,19 +738,128 @@ def style_simple_table(df: pd.DataFrame, bold_last: bool = False) -> pd.io.forma
 
     return sty
 
-def get_portrait_url(players_df: pd.DataFrame, canonical_name: str) -> str | None:
-    """Vráti URL portrétu hráča (alebo None). Porovnáva presne 'Hráč' == canonical_name (Priezvisko Meno)."""
+def get_portrait_ref(players_df: pd.DataFrame, canonical_name: str) -> str | None:
+    """Vráti referenciu na portrét hráča z df_players_sheet.
+
+    Uprednostní lokálnu cestu zo stĺpca _portrait_raw (resp. Portret/Portrét),
+    prípadne použije _portrait_url.
+    """
     if players_df is None or players_df.empty or not canonical_name:
         return None
     try:
         sub = players_df[players_df["Hráč"].astype(str).str.strip() == str(canonical_name).strip()]
         if sub.empty:
             return None
-        url = sub.iloc[0]["_portrait_url"]
-        return str(url) if (pd.notna(url) and str(url).startswith("http")) else None
+        row = sub.iloc[0]
+        for col in ("_portrait_raw", "Portret", "Portrét", "_portrait_url"):
+            if col in sub.columns:
+                v = row.get(col)
+                if pd.notna(v) and str(v).strip():
+                    return str(v).strip()
+        return None
     except Exception:
-        return None	
-	
+        return None
+
+def get_portrait_url(players_df: pd.DataFrame, canonical_name: str) -> str | None:
+    """Spätná kompatibilita: vráti referenciu na portrét (lokálna cesta alebo URL)."""
+    return get_portrait_ref(players_df, canonical_name)
+
+# -----------------------------
+# Portréty hráčov – URL/Local path + fallback
+# -----------------------------
+
+# GITHUB_RAW_BASE = "https://raw.githubusercontent.com/Jasen77/lefties-righties/main/"
+
+@st.cache_data(show_spinner=False)
+def _url_exists(url: str, timeout: float = 3.0) -> bool:
+    """
+    Overí, či vzdialený súbor na URL existuje (HTTP 200).
+    Používa HEAD, pri zlyhaní skúsi GET (niektoré servery HEAD nepodporujú).
+    """
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    if not (u.startswith('http://') or u.startswith('https://')):
+        return False
+    try:
+        import requests
+        r = requests.head(u, allow_redirects=True, timeout=timeout)
+        if r.status_code == 200:
+            return True
+        # fallback na GET
+        r = requests.get(u, stream=True, allow_redirects=True, timeout=timeout)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+@st.cache_data(show_spinner=False)
+def _local_exists(path_str: str) -> bool:
+    # Lokálny súbor: relatívne cesty berieme voči BASE_DIR (adresár app.py).
+    if not path_str or not isinstance(path_str, str):
+        return False
+    s = path_str.strip()
+    if not s:
+        return False
+    if s.startswith('http://') or s.startswith('https://'):
+        return False
+    try:
+        pp = Path(s)
+        if not pp.is_absolute():
+            pp = BASE_DIR / pp
+        return pp.exists()
+    except Exception:
+        return False
+
+def resolve_portrait_ref(ref) -> str | None:
+    # Lokálne portréty: Excel obsahuje iba názov súboru (napr. 'SegéňJ.jpg').
+    if ref is None or (isinstance(ref, float) and pd.isna(ref)):
+        return None
+    s = str(ref).strip()
+    if not s:
+        return None
+
+    if re.match(r'^https?://', s, flags=re.IGNORECASE):
+        return None
+
+    mm = re.search(r'\(([^)]+)\)', s)
+    if mm:
+        cand = mm.group(1).strip()
+        if cand and not re.match(r'^https?://', cand, flags=re.IGNORECASE):
+            s = cand
+
+    if s.startswith(('/', '\\')) or re.match(r'^[A-Za-z]:\\', s):
+        return None
+
+    s = s.replace('\\', '/').lstrip('./')
+    if s.lower().startswith('players/'):
+        s = s.split('/', 1)[1]
+
+    return str(PLAYERS_DIR / s) if s else None
+
+def portrait_with_fallback(players_df: pd.DataFrame, canonical_name: str) -> str:
+    # Vráti lokálnu cestu k portrétu hráča, inak ANONYM_FILE.
+    ref = get_portrait_url(players_df, canonical_name)
+    ref = resolve_portrait_ref(ref)
+
+    if not ref and players_df is not None and not players_df.empty and canonical_name:
+        try:
+            sub = players_df[players_df['Hráč'].astype(str).str.strip() == str(canonical_name).strip()]
+            if not sub.empty:
+                for col in ('_portrait_raw', 'Portret', 'Portrét', '_portrait_url'):
+                    if col in sub.columns:
+                        v = sub.iloc[0][col]
+                        ref2 = resolve_portrait_ref(v)
+                        if ref2:
+                            ref = ref2
+                            break
+        except Exception:
+            pass
+
+    if ref and _local_exists(ref):
+        return ref
+
+    return resolve_portrait_ref(ANONYM_FILE) or str(PLAYERS_DIR / Path(ANONYM_FILE).name)
+
 # -----------------------------
 # Globálny stav filtra + perzistencia (JSON) – PER-USER
 # -----------------------------
@@ -1196,18 +1314,22 @@ def build_player_years_count_display(df_all: pd.DataFrame) -> dict[str, int]:
 
     return {p: len(ys) for p, ys in years_by_player.items()}
     
+  
+
+  
     
-    
-# -----------------------------
+# =============================
 # UI – Tabs: Turnaje | Štatistiky | Detail hráča | Filter
-# -----------------------------
+# =============================
 
 tab_turnaje, tab_stats, tab_player, tab_filter = st.tabs(["Turnaje", "Štatistiky", "Detail hráča", "Filter"])
 
 
-# -----------------------------
+
+
+# *****************************
 # Štatistiky
-# -----------------------------
+# *****************************
 with tab_stats:
     st.subheader("Štatistiky")
 
@@ -1652,10 +1774,12 @@ with tab_stats:
         except Exception as _ex:
             st.warning(f"Export Štatistík do Excelu sa nepodaril: {type(_ex).__name__}: {_ex}")        
         
-# -----------------------------
+
+
+
+# *****************************
 # Detail hráča
-# -----------------------------
-# --- Detail hráča ---
+# *****************************
 with tab_player:
     st.subheader("Detail hráča")
 
@@ -1821,67 +1945,56 @@ with tab_player:
         agg_fmt.append({"Formát": "Spolu", "Body": _fmt_pts(tot_pts), "Zápasy": tot_cnt, "Úspešnosť": f"{_pct(tot_pts, tot_cnt)} %"})
         df_fmt_sum = pd.DataFrame(agg_fmt)
 
-        # -- Portrét hráča (200x200) ak existuje v hárku "Hráči"
-        portrait_url = get_portrait_url(df_players_sheet, selected_canonical)
-        # st.write(portrait_url)
-        if portrait_url:
-            # používame HTML kvôli šírke aj výške naraz (Streamlit st.image vie priamo nastaviť len width)
-            st.markdown(
-                f"""
-                <div style="margin: 6px 0 10px 0;">
-                    <img src="{portrait_url}"
-                         alt="Portrét hráča"
-                         style="width:200px; height:200px; object-fit:cover; border-radius:8px;"/>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )    
-    
+        # -- Portrét hráča (200x200) – lokálna cesta z Excelu + fallback na ANONYM_FILE
+        portrait_ref = portrait_with_fallback(df_players_sheet, selected_canonical)
+        if portrait_ref:
+            st.image(portrait_ref, width=200)
 
-            st.markdown("### Sumár podľa formátu")
-            st.markdown(style_simple_table(df_fmt_sum, bold_last=True).to_html(), unsafe_allow_html=True)
+        st.markdown("### Sumár podľa formátu")
+        st.markdown(style_simple_table(df_fmt_sum, bold_last=True).to_html(), unsafe_allow_html=True)
 
-            # -- SUMÁR podľa turnaja (Rok ↓, Rezort) + Spolu
-            rezort_map = {}
-            if not df_tournaments.empty and "Rok" in df_tournaments.columns and "Rezort" in df_tournaments.columns:
-                rezort_map = {int(r["Rok"]): str(r["Rezort"]).strip() for _, r in df_tournaments.iterrows() if pd.notna(r["Rok"])}
+        # -- SUMÁR podľa turnaja (Rok ↓, Rezort) + Spolu
+        rezort_map = {}
+        if not df_tournaments.empty and "Rok" in df_tournaments.columns and "Rezort" in df_tournaments.columns:
+            rezort_map = {int(r["Rok"]): str(r["Rezort"]).strip() for _, r in df_tournaments.iterrows() if pd.notna(r["Rok"])}
 
-            year_stats = {}
-            for _, r in df_player.iterrows():
-                y = int(r.get("Rok")) if pd.notna(r.get("Rok")) else None
-                if y is None:
-                    continue
-                year_stats.setdefault(y, {"pts": 0.0, "cnt": 0})
-                year_stats[y]["pts"] += float(r["_points"])
-                year_stats[y]["cnt"] += 1
+        year_stats = {}
+        for _, r in df_player.iterrows():
+            y = int(r.get("Rok")) if pd.notna(r.get("Rok")) else None
+            if y is None:
+                continue
+            year_stats.setdefault(y, {"pts": 0.0, "cnt": 0})
+            year_stats[y]["pts"] += float(r["_points"])
+            year_stats[y]["cnt"] += 1
 
-            rows_years = []
-            y_tot_pts, y_tot_cnt = 0.0, 0
-            for y in sorted(year_stats.keys(), reverse=True):
-                pts = float(year_stats[y]["pts"]); cnt = int(year_stats[y]["cnt"])
-                rows_years.append({
-                    "Rok": y,
-                    "Rezort": rezort_map.get(y, ""),
-                    "Body": _fmt_pts(pts),
-                    "Zápasy": cnt,
-                    "Úspešnosť": f"{_pct(pts, cnt)} %"
-                })
-                y_tot_pts += pts; y_tot_cnt += cnt
+        rows_years = []
+        y_tot_pts, y_tot_cnt = 0.0, 0
+        for y in sorted(year_stats.keys(), reverse=True):
+            pts = float(year_stats[y]["pts"]); cnt = int(year_stats[y]["cnt"])
+            rows_years.append({
+                "Rok": y,
+                "Rezort": rezort_map.get(y, ""),
+                "Body": _fmt_pts(pts),
+                "Zápasy": cnt,
+                "Úspešnosť": f"{_pct(pts, cnt)} %"
+            })
+            y_tot_pts += pts; y_tot_cnt += cnt
 
-            rows_years.append({"Rok": "", "Rezort": "Spolu", "Body": _fmt_pts(y_tot_pts), "Zápasy": y_tot_cnt, "Úspešnosť": f"{_pct(y_tot_pts, y_tot_cnt)} %"})
-            df_year_sum = pd.DataFrame(rows_years, columns=["Rok", "Rezort", "Body", "Zápasy", "Úspešnosť"])
+        rows_years.append({"Rok": "", "Rezort": "Spolu", "Body": _fmt_pts(y_tot_pts), "Zápasy": y_tot_cnt, "Úspešnosť": f"{_pct(y_tot_pts, y_tot_cnt)} %"})
+        df_year_sum = pd.DataFrame(rows_years, columns=["Rok", "Rezort", "Body", "Zápasy", "Úspešnosť"])
 
-            st.markdown("### Sumár podľa turnaja")
-            df_year_sum_disp = df_year_sum.copy()
-            if _device_type == 'mobil':
-                df_year_sum_disp = df_year_sum_disp.rename(columns={'Body':'B','Zápasy':'Z','Úspešnosť':'Ú'})
-                st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
-            st.markdown(style_simple_table(df_year_sum_disp, bold_last=True).to_html(), unsafe_allow_html=True)
-            if _device_type == 'mobil':
-                st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("### Sumár podľa turnaja")
+        df_year_sum_disp = df_year_sum.copy()
+        if _device_type == 'mobil':
+            df_year_sum_disp = df_year_sum_disp.rename(columns={'Body':'B','Zápasy':'Z','Úspešnosť':'Ú'})
+            st.markdown('<div class="mobile-fit">', unsafe_allow_html=True)
+        st.markdown(style_simple_table(df_year_sum_disp, bold_last=True).to_html(), unsafe_allow_html=True)
+        if _device_type == 'mobil':
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            # -- TABUĽKA PÁROV ROZDELENÁ NA 2 STĹPCE: Foursome | Fourball (iba strana vybraného hráča)
+        # -- TABUĽKA PÁROV ROZDELENÁ NA 2 STĹPCE: Foursome / Fourball (iba strana vybraného hráča)
             df_pairs = df_player[df_player["Formát"].isin(["Foursome", "Fourball"])].copy() if not df_player.empty else df_player.copy()
+
             if not df_pairs.empty:
                 pair_col = "Lefties" if player_team == "Lefties" else "Righties"
 
@@ -1891,8 +2004,7 @@ with tab_player:
                 if pair_col == "Righties" and "Righties" not in df_pairs.columns and {"R1", "R2"}.issubset(df_pairs.columns):
                     df_pairs["Righties"] = df_pairs[["R1", "R2"]].astype(str).agg(", ".join, axis=1)
 
-                # Čistič názvov dvojíc – odstráni zátvorky, apostrofy a koncovú čiarku
-                import re
+                # Čistič názvov dvojíc
                 def _clean_pair_name(x) -> str:
                     if isinstance(x, (list, tuple)):
                         return ", ".join(map(str, x)).strip()
@@ -1902,33 +2014,22 @@ with tab_player:
                     if s.endswith(","):
                         s = s[:-1].strip()
                     s = s.strip("'").strip('"')
-                    if re.search(r"'\s*,\s*'", s):
-                        parts = re.split(r"'\s*,\s*'", s.strip("'"))
-                        s = ", ".join(p.strip("'").strip('"').strip() for p in parts if p.strip())
                     s = re.sub(r"\s*,\s*", ", ", s)
                     return s
 
-                # Pomocná funkcia: agregácia/poradie/formátovanie + RIADOK SPOLU pre 1 formát
                 def _pairs_table_for_format(df_src: pd.DataFrame, fmt_name: str) -> pd.DataFrame:
                     sub = df_src[df_src["Formát"] == fmt_name].copy()
                     if sub.empty:
                         return pd.DataFrame(columns=[pair_col, "Body", "Zápasy", "Úspešnosť"])
 
-                    # Agregácia: (moja dvojica v danom formáte) – súper sa ignoruje
                     g = sub.groupby([pair_col], dropna=False)
                     rows = []
                     tot_pts, tot_cnt = 0.0, 0
-
                     for pnames, grp in g:
                         pts = float(grp["_points"].sum())
                         cnt = int(len(grp))
                         succ = int(round((pts / cnt) * 100)) if cnt else 0
-                        rows.append({
-                            pair_col: pnames,
-                            "_Body_num": pts,
-                            "_Zápasy_num": cnt,
-                            "_Úspešnosť_num": succ,
-                        })
+                        rows.append({pair_col: pnames, "_Body_num": pts, "_Zápasy_num": cnt, "_Úspešnosť_num": succ})
                         tot_pts += pts
                         tot_cnt += cnt
 
@@ -1936,42 +2037,27 @@ with tab_player:
                     if out.empty:
                         return pd.DataFrame(columns=[pair_col, "Body", "Zápasy", "Úspešnosť"])
 
-                    # Očisti názvy dvojíc
                     out[pair_col] = out[pair_col].apply(_clean_pair_name)
-
-                    # TRIEDENIE: Úspešnosť ↓, Body ↓
                     out.sort_values(by=["_Úspešnosť_num", "_Body_num"], ascending=[False, False], inplace=True)
 
-                    # Formátovanie výstupu
                     def _fmt_pts(x: float) -> str:
                         return f"{int(x)}" if float(x).is_integer() else f"{x:.1f}"
 
                     out["Body"] = out["_Body_num"].apply(_fmt_pts)
                     out["Zápasy"] = out["_Zápasy_num"].astype(int)
                     out["Úspešnosť"] = out["_Úspešnosť_num"].astype(int).map(lambda v: f"{v} %")
-
-                    # Finálne stĺpce
                     out = out[[pair_col, "Body", "Zápasy", "Úspešnosť"]]
 
-                    # --- RIADOK SPOLU pre daný formát (sum Body, sum Zápasy, vypočítaná úspešnosť) ---
                     succ_tot = int(round((tot_pts / tot_cnt) * 100)) if tot_cnt else 0
                     out = pd.concat([
                         out,
-                        pd.DataFrame([{
-                            pair_col: "Spolu",
-                            "Body": _fmt_pts(tot_pts),
-                            "Zápasy": tot_cnt,
-                            "Úspešnosť": f"{succ_tot} %",
-                        }])
+                        pd.DataFrame([{pair_col: "Spolu", "Body": _fmt_pts(tot_pts), "Zápasy": tot_cnt, "Úspešnosť": f"{succ_tot} %"}])
                     ], ignore_index=True)
-
                     return out
 
-                # Vygeneruj obe tabuľky – každá má svoj riadok Spolu
                 df_pairs_fs = _pairs_table_for_format(df_pairs, "Foursome")
                 df_pairs_fb = _pairs_table_for_format(df_pairs, "Fourball")
 
-                # Render vedľa seba v dvoch stĺpcoch
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("### Dvojice Foursome")
@@ -1986,11 +2072,10 @@ with tab_player:
                         st.info("Žiadne párové zápasy vo formáte **Fourball**.")
                     else:
                         st.markdown(style_simple_table(df_pairs_fb, bold_last=True).to_html(), unsafe_allow_html=True)
-
             else:
                 st.info("Hráč neodohral žiadne zápasy formátov **Foursome/Fourball** v zvolených rokoch.")
 
-            # --- PROTIHRÁČI (agregácia za všetkých súperov z aktuálne vyfiltrovaných zápasov hráča)
+            # --- PROTIHRÁČI# --- PROTIHRÁČI (agregácia za všetkých súperov z aktuálne vyfiltrovaných zápasov hráča)
             # Ak je hráč v Lefties -> súperi z R1/R2, ak v Righties -> súperi z L1/L2
             opp_cols = ["R1", "R2"] if player_team == "Lefties" else ["L1", "L2"]
 
@@ -2268,42 +2353,12 @@ with tab_player:
                 st.warning(f"Export detailu hráča do Excelu sa nepodaril: {type(_ex).__name__}: {_ex}")
     
 
-# -----------------------------
-# Filter
-# -----------------------------
-with tab_filter:
-    st.subheader("Filter")
-    c1, c2 = st.columns([2, 1])
 
-    with c1:
-        st.markdown("### Turnaje")
-        tournament_items = _build_tournament_items(df_tournaments)
-        st.session_state.setdefault('flt_t_keys', [it['key'] for it in tournament_items])
 
-        # Master
-        st.checkbox("Všetky turnaje", key='flt_t_all', on_change=_toggle_all_tournaments)
 
-        # Deti
-        for item in tournament_items:
-            st.session_state.setdefault(item['key'], True)
-            st.checkbox(item['label'], key=item['key'], on_change=_on_filter_change)
-
-        selected_tournaments = [it['label'] for it in tournament_items if st.session_state.get(it['key'], False)]
-        st.session_state['flt_tournaments'] = selected_tournaments
-        st.caption(f"Vybrané turnaje: {len(selected_tournaments)}/{len(tournament_items)}")
-
-    with c2:
-        st.markdown("### Tímy")
-        st.checkbox("Lefties", key='flt_team_lefties', on_change=_on_filter_change)
-        st.checkbox("Righties", key='flt_team_righties', on_change=_on_filter_change)
-
-        st.markdown("### Formáty hry")
-        st.checkbox("Foursome", key='flt_fmt_foursome', on_change=_on_filter_change)
-        st.checkbox("Fourball", key='flt_fmt_fourball', on_change=_on_filter_change)
-        st.checkbox("Single", key='flt_fmt_single', on_change=_on_filter_change)
-# -----------------------------
+# *****************************
 # Turnaje
-# -----------------------------
+# *****************************
 with tab_turnaje:
     st.subheader("Turnaje")
     tdf = df_tournaments.copy()
@@ -2499,3 +2554,40 @@ with tab_turnaje:
                 st.image(photo_url,  width=800)
             #     st.image(photo_url,  use_container_width=True)
             st.markdown("")
+
+
+
+
+# *****************************
+# Filter
+# *****************************
+with tab_filter:
+    st.subheader("Filter")
+    c1, c2 = st.columns([2, 1])
+
+    with c1:
+        st.markdown("### Turnaje")
+        tournament_items = _build_tournament_items(df_tournaments)
+        st.session_state.setdefault('flt_t_keys', [it['key'] for it in tournament_items])
+
+        # Master
+        st.checkbox("Všetky turnaje", key='flt_t_all', on_change=_toggle_all_tournaments)
+
+        # Deti
+        for item in tournament_items:
+            st.session_state.setdefault(item['key'], True)
+            st.checkbox(item['label'], key=item['key'], on_change=_on_filter_change)
+
+        selected_tournaments = [it['label'] for it in tournament_items if st.session_state.get(it['key'], False)]
+        st.session_state['flt_tournaments'] = selected_tournaments
+        st.caption(f"Vybrané turnaje: {len(selected_tournaments)}/{len(tournament_items)}")
+
+    with c2:
+        st.markdown("### Tímy")
+        st.checkbox("Lefties", key='flt_team_lefties', on_change=_on_filter_change)
+        st.checkbox("Righties", key='flt_team_righties', on_change=_on_filter_change)
+
+        st.markdown("### Formáty hry")
+        st.checkbox("Foursome", key='flt_fmt_foursome', on_change=_on_filter_change)
+        st.checkbox("Fourball", key='flt_fmt_fourball', on_change=_on_filter_change)
+        st.checkbox("Single", key='flt_fmt_single', on_change=_on_filter_change)
