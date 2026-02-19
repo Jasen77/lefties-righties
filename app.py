@@ -517,6 +517,23 @@ with st.sidebar:
     else:
         st.caption("Rozlíšenie nie je dostupné (JS komponent).")
 
+    # --- Obnoviť dáta: vymaže cache a reštartuje appku
+    if st.button('🔄 Obnoviť dáta', use_container_width=True, key='btn_refresh_data'):
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        try:
+            st.cache_resource.clear()
+        except Exception:
+            pass
+        try:
+            st.session_state.clear()
+        except Exception:
+            pass
+        st.rerun()
+
+
 
 # with st.expander("Technické detaily (User-Agent / displej)"):
 #     st.code(_ua or "User-Agent nebol dostupný (Streamlit neposkytol hlavičky).")
@@ -888,29 +905,6 @@ def _current_user_id():
 _uid = _current_user_id()
 _uid_s = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in _uid)
 FILTER_JSON_FILE = f"Filter/filter_state_{_uid_s}.json"
-
-# --- DEBUG: Filter JSON (voliteľné) ---
-def _debug_filter_json_ui():
-    try:
-        with st.sidebar.expander('DEBUG FILTER JSON', expanded=False):
-            st.write('FILTER_JSON_FILE:', FILTER_JSON_FILE)
-            p_json = Path(FILTER_JSON_FILE)
-            st.write('exists:', p_json.exists())
-            st.write('mtime:', datetime.fromtimestamp(p_json.stat().st_mtime) if p_json.exists() else None)
-            st.write('flt_bootstrapped:', st.session_state.get('flt_bootstrapped'))
-            st.write('flt_json_mtime(session):', st.session_state.get('flt_json_mtime'))
-            st.write('flt_t_all:', st.session_state.get('flt_t_all'))
-            st.write('flt_team_lefties:', st.session_state.get('flt_team_lefties'))
-            st.write('flt_team_righties:', st.session_state.get('flt_team_righties'))
-            st.write('flt_fmt_foursome:', st.session_state.get('flt_fmt_foursome'))
-            st.write('flt_fmt_fourball:', st.session_state.get('flt_fmt_fourball'))
-            st.write('flt_fmt_single:', st.session_state.get('flt_fmt_single'))
-    except Exception:
-        pass
-
-_debug_filter_json_ui()
-
-
 
 @dataclass
 class FilterState:
