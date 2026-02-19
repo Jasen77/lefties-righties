@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
 
 APP_NAME = "Lefties vs Righties Ryder Cup"
-APP_VERSION = "1.2.11"
+APP_VERSION = "1.2.12"
 APP_CREATED = "19.02.2026"
 
 DATA_FILE = "Data/GolfData.xlsx"
